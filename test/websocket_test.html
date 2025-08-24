@@ -1,0 +1,177 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <title>Live Stream Test</title>
+    <style>
+        body { font-family: Arial, sans-serif; margin: 20px; }
+        .container { max-width: 600px; margin: 0 auto; }
+        .chat-box { border: 1px solid #ccc; height: 300px; overflow-y: scroll; padding: 10px; margin: 10px 0; background: #f9f9f9; }
+        .input-group { margin: 10px 0; }
+        .input-group input, select, button { padding: 8px; margin: 5px; }
+        .seller { background-color: #e3f2fd; padding: 5px; margin: 2px; border-radius: 3px; }
+        .viewer { background-color: #f3e5f5; padding: 5px; margin: 2px; border-radius: 3px; }
+        .system { background-color: #fff3e0; padding: 5px; margin: 2px; border-radius: 3px; font-style: italic; }
+        .status { padding: 10px; margin: 10px 0; border-radius: 5px; }
+        .connected { background: #d4edda; color: #155724; }
+        .disconnected { background: #f8d7da; color: #721c24; }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <h1>🛍️ Live Stream (External WebSocket)</h1>
+        
+        <div class="input-group">
+            <input type="text" id="streamId" placeholder="Stream ID" value="test123">
+            <input type="text" id="userId" placeholder="User ID" value="user1">
+            <select id="userType">
+                <option value="seller">Seller</option>
+                <option value="viewer">Viewer</option>
+            </select>
+            <button onclick="connect()">Connect</button>
+            <button onclick="disconnect()">Disconnect</button>
+        </div>
+
+        <div id="status" class="status disconnected">Status: Disconnected</div>
+
+        <div class="input-group">
+            <input type="text" id="messageContent" placeholder="Type message..." style="width: 300px;">
+            <button onclick="sendMessage()">Send Chat</button>
+        </div>
+
+        <div class="input-group">
+            <input type="text" id="productName" placeholder="Product Name" value="iPhone 15">
+            <input type="number" id="productPrice" placeholder="Price" value="999">
+            <button onclick="showcaseProduct()">Showcase Product</button>
+        </div>
+
+        <div class="input-group">
+            <button onclick="getViewers()">Get Viewers</button>
+            <span id="viewerCount">Viewers: 0</span>
+        </div>
+
+        <div id="chatBox" class="chat-box"></div>
+    </div>
+
+    <script>
+        let socket = null;
+        const WEBSOCKET_URL = 'ws://localhost:8081'; // External WebSocket service
+
+        function connect() {
+            const streamId = document.getElementById('streamId').value;
+            const userId = document.getElementById('userId').value;
+            const userType = document.getElementById('userType').value;
+
+            const wsUrl = `${WEBSOCKET_URL}/ws/livestream/${streamId}?user_id=${userId}&user_type=${userType}`;
+            socket = new WebSocket(wsUrl);
+
+            socket.onopen = function() {
+                document.getElementById('status').innerHTML = 'Status: Connected to External WebSocket';
+                document.getElementById('status').className = 'status connected';
+                addMessage('System', 'Connected to external WebSocket service!', 'system');
+            };
+
+            socket.onmessage = function(event) {
+                const message = JSON.parse(event.data);
+                handleMessage(message);
+            };
+
+            socket.onclose = function() {
+                document.getElementById('status').innerHTML = 'Status: Disconnected';
+                document.getElementById('status').className = 'status disconnected';
+                addMessage('System', 'Disconnected from WebSocket service', 'system');
+            };
+        }
+
+        function disconnect() {
+            if (socket) socket.close();
+        }
+
+        function sendMessage() {
+            if (!socket) return;
+            const content = document.getElementById('messageContent').value;
+            if (!content) return;
+
+            socket.send(JSON.stringify({
+                type: 'chat',
+                content: content
+            }));
+            document.getElementById('messageContent').value = '';
+        }
+
+        function showcaseProduct() {
+            if (!socket) return;
+            const name = document.getElementById('productName').value;
+            const price = document.getElementById('productPrice').value;
+
+            socket.send(JSON.stringify({
+                type: 'product_showcase',
+                product: { name: name, price: price },
+                content: `Showing: ${name} - $${price}`
+            }));
+        }
+
+        function getViewers() {
+            const streamId = document.getElementById('streamId').value;
+            fetch(`http://localhost:8081/api/livestream/${streamId}/viewers`)
+                .then(response => response.json())
+                .then(data => {
+                    updateViewerCountDisplay(data.viewer_count, data.viewers);
+                    addMessage('System', `Current viewers: ${data.viewers.join(', ')}`, 'system');
+                })
+                .catch(err => {
+                    console.error('Error fetching viewer count:', err);
+                    addMessage('System', 'Error fetching viewer count', 'system');
+                });
+        }
+
+        function updateViewerCountDisplay(count, viewers) {
+            const viewerCountEl = document.getElementById('viewerCount');
+            viewerCountEl.textContent = `Viewers: ${count}`;
+            
+            // Add a small animation to show the change
+            viewerCountEl.style.transform = 'scale(1.1)';
+            setTimeout(() => {
+                viewerCountEl.style.transform = 'scale(1)';
+            }, 200);
+        }
+
+        function handleMessage(message) {
+            switch (message.type) {
+                case 'chat':
+                    addMessage(message.user_id, message.content, message.user_type);
+                    break;
+                case 'product_showcase':
+                    addMessage(message.user_id, `📦 ${message.content}`, 'seller');
+                    break;
+                case 'viewer_joined':
+                    addMessage('System', `${message.user_id} joined`, 'system');
+                    getViewers(); // Update viewer count
+                    break;
+                case 'viewer_left':
+                    addMessage('System', `${message.user_id} left`, 'system');
+                    getViewers(); // Update viewer count
+                    break;
+                case 'announcement':
+                    addMessage('📢 Announcement', message.content, 'system');
+                    break;
+            }
+        }
+
+        function addMessage(sender, content, type) {
+            const chatBox = document.getElementById('chatBox');
+            const messageDiv = document.createElement('div');
+            messageDiv.className = type;
+            
+            const time = new Date().toLocaleTimeString();
+            messageDiv.innerHTML = `<strong>[${time}] ${sender}:</strong> ${content}`;
+            
+            chatBox.appendChild(messageDiv);
+            chatBox.scrollTop = chatBox.scrollHeight;
+        }
+
+        document.getElementById('messageContent').addEventListener('keypress', function(e) {
+            if (e.key === 'Enter') sendMessage();
+        });
+    </script>
+</body>
+</html>
